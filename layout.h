@@ -39,8 +39,12 @@ typedef struct {
 
 typedef struct {
     uint64_t next_inode_block;
-    uint64_t padding; // Align to 16 bytes
-    uint64_t blocks[(GLFS_BLOCK_SIZE - 16) / 8]; // Array of block pointers
+    uint64_t skip_4;
+    uint64_t skip_16;
+    uint64_t skip_64;
+    uint64_t skip_256;
+    uint64_t skip_1024;
+    uint64_t blocks[GLFS_BLOCK_SIZE / 8 - 6]; // Array of block pointers
 } PACKED inode_continuation_t;
 
 #define MAX_FILENAME_LENGTH (256 - 9) // Make dirents 256 bytes long

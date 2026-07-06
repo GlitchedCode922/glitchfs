@@ -44,10 +44,9 @@ The bitmap is located after the superblock. It contains 1 bit per block. The bit
 
 ### Inodes
 
-An inode represents a file, directory or special file. It contains the file's metadata and its block pointers. If the inode block is full, it is expanded on one or more continuation blocks, which contain block pointers and links to the next inode blocks (next, +4, +16, +64, +256 and +1024). If a `skip_N` pointer contains a value of 0, it is invalid and should be ignored. The inode number is equal to its first block number. A directory inode contains dirents instead of file data. After being deleted, the signature of an inode must be cleared.
+An inode represents a file, directory or special file. It contains the file's metadata and its block pointers. If the inode block is full, it is expanded on one or more continuation blocks, which contain block pointers and links to the next inode blocks (next, +4, +16, +64, +256 and +1024). If a `skip_N` pointer contains a value of 0, it should be ignored. For `next_inode_block`, a value of 0 marks the end of the list. The inode number is equal to its first block number. A directory inode contains dirents instead of file data. After being deleted, the signature of an inode must be cleared.
 
 ```c
-
 enum {
     GLFS_FILE = 1,
     GLFS_DIR = 2,

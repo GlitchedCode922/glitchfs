@@ -88,7 +88,7 @@ typedef struct {
 
 ### Dirents
 
-A dirent stores a path segment, and an inode number. If the inode number is `0`, the dirent is deleted. Dirents have a fixed size of 256 bytes. Single and double dot entries are not stored.
+A dirent stores a path segment, and an inode number. Dirents with an `inodeptr` equal to 0 are invalid. To delete a dirent, replace it with another one (shift or move last) and truncate the inode. Dirents have a fixed size of 256 bytes. Single and double dot entries are not stored.
 
 ```c
 #define MAX_FILENAME_LENGTH (256 - 8) // Make dirents 256 bytes long

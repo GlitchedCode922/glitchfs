@@ -1,6 +1,6 @@
-# GlitchedFS
+# GlitchFS
 
-GlitchedFS is a 64-bit, block-based filesystem designed to be simple enough for hobby OSes, while being scalable to very large disks.
+GlitchFS is a 64-bit, block-based filesystem designed to be simple enough for hobby OSes, while being scalable to very large disks.
 
 ## Design goals
 

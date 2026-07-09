@@ -1,6 +1,5 @@
 #pragma once
 #include <stdint.h>
-#include <sys/types.h>
 
 #define GLFS_BLOCK_SIZE 4096 // Size of a block in bytes (4KiB)
 
@@ -14,7 +13,7 @@ typedef struct {
     uint64_t root_inode; // Inode number of the root directory
     uint64_t next_free; // Next free block number
     uint8_t reserved[GLFS_BLOCK_SIZE - 6 * 8]; // Alignment padding
-} PACKED superblock_t;
+} PACKED glfs_superblock_t;
 
 enum {
     GLFS_REG = 1,
@@ -40,7 +39,7 @@ typedef struct {
     uint64_t block_count; // Number of blocks allocated to the file
     // Header end
     uint64_t blocks[(GLFS_BLOCK_SIZE - 128) / 8]; // Array of block pointers
-} PACKED inode_t;
+} PACKED glfs_inode_t;
 
 typedef struct {
     uint64_t next_inode_block;
@@ -50,12 +49,12 @@ typedef struct {
     uint64_t skip_256;
     uint64_t skip_1024;
     uint64_t blocks[GLFS_BLOCK_SIZE / 8 - 6]; // Array of block pointers
-} PACKED inode_continuation_t;
+} PACKED glfs_inode_continuation_t;
 
-#define MAX_FILENAME_LENGTH (256 - 8) // Make dirents 256 bytes long
+#define GLFS_MAX_FILENAME_LENGTH (256 - 8) // Make dirents 256 bytes long
 typedef struct {
     uint64_t inodeptr;
-    char name[MAX_FILENAME_LENGTH];
-} PACKED dirent_t;
+    char name[GLFS_MAX_FILENAME_LENGTH];
+} PACKED glfs_dirent_t;
 
 #undef PACKED

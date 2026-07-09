@@ -1,4 +1,4 @@
-#include "layout.h"
+#include <glfs/layout.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Initialize superblock
-    superblock_t superblock;
+    glfs_superblock_t superblock;
     memset(&superblock, 0, sizeof(superblock));
     memcpy(superblock.signature, "GlitchFS", 8);
     superblock.version = 1;
@@ -85,26 +85,26 @@ int main(int argc, char *argv[]) {
     free(bitmap);
 
     // Write root inode (empty)
-    inode_t root_inode;
+    glfs_inode_t root_inode;
     memset(&root_inode, 0, sizeof(root_inode));
     uint64_t sig;
     memcpy(&sig, "GLFS_INO", 8);
     sig ^= superblock.root_inode;
-    memcpy(root_inode.header.signature, &sig, 8);
-    root_inode.header.perms = 0755; // Default permissions for root directory
-    root_inode.header.type = GLFS_DIR; // Directory type
-    root_inode.header.size = 0; // Empty directory
+    memcpy(root_inode.signature, &sig, 8);
+    root_inode.perms = 0755; // Default permissions for root directory
+    root_inode.type = GLFS_DIR; // Directory type
+    root_inode.size = 0; // Empty directory
 
-    root_inode.header.uid = 0; // Root user
-    root_inode.header.gid = 0; // Root group
+    root_inode.uid = 0; // Root user
+    root_inode.gid = 0; // Root group
 
-    root_inode.header.atime = 0; // Access time
-    root_inode.header.mtime = 0; // Modification time
-    root_inode.header.ctime = 0; // Change time
-    root_inode.header.refcount = 1; // One reference (the root directory itself)
+    root_inode.atime = 0; // Access time
+    root_inode.mtime = 0; // Modification time
+    root_inode.ctime = 0; // Change time
+    root_inode.refcount = 1; // One reference (the root directory itself)
 
     fseek(fp, (16 + 1 + superblock.bitmap_size) * GLFS_BLOCK_SIZE, SEEK_SET); // Skip boot area, superblock, and bitmap
-    if (fwrite(&root_inode, sizeof(inode_t), 1, fp) != 1) {
+    if (fwrite(&root_inode, GLFS_BLOCK_SIZE, 1, fp) != 1) {
         perror("Failed to write root inode");
         fclose(fp);
         return 1;

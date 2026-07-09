@@ -1,4 +1,4 @@
-#include "layout.h"
+#include <glfs/layout.h>
 #include <stdio.h>
 
 int struct_test(char* name, size_t expected_size, size_t actual_size) {
@@ -12,11 +12,10 @@ int struct_test(char* name, size_t expected_size, size_t actual_size) {
 
 int main() {
     int results = 0;
-    results += struct_test("superblock_t", GLFS_BLOCK_SIZE, sizeof(superblock_t));
-    results += struct_test("inode_hdr_t", 128, sizeof(inode_hdr_t));
-    results += struct_test("inode_t", GLFS_BLOCK_SIZE, sizeof(inode_t));
-    results += struct_test("inode_continuation_t", GLFS_BLOCK_SIZE, sizeof(inode_continuation_t));
-    results += struct_test("dirent_t", 256, sizeof(dirent_t));
+    results += struct_test("glfs_superblock_t", GLFS_BLOCK_SIZE, sizeof(glfs_superblock_t));
+    results += struct_test("glfs_inode_t", GLFS_BLOCK_SIZE, sizeof(glfs_inode_t));
+    results += struct_test("glfs_inode_continuation_t", GLFS_BLOCK_SIZE, sizeof(glfs_inode_continuation_t));
+    results += struct_test("glfs_dirent_t", 256, sizeof(glfs_dirent_t));
 
     return results;
 }

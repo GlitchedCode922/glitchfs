@@ -39,6 +39,9 @@ typedef struct {
     uint64_t rdev;
 } glfs_stat_t;
 
+int glfs_check(glfs_backing_t* backing);
+glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro);
+
 int glfs_readdir(glfs_mount_t* mount, const char* path, int index, glfs_readdir_entry_t* out);
 int64_t glfs_read(glfs_mount_t* mount, const char* path, void* buffer, uint64_t offset, uint64_t size);
 int64_t glfs_write(glfs_mount_t* mount, const char *path, const void* buffer, uint64_t offset, uint64_t size);

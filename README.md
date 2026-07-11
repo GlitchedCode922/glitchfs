@@ -33,7 +33,7 @@ typedef struct {
     uint64_t root_inode; // Inode number of the root directory
     uint64_t next_free; // Next free block number
     uint8_t reserved[GLFS_BLOCK_SIZE - 6 * 8]; // Alignment padding
-} PACKED superblock_t;
+} PACKED glfs_superblock_t;
 ```
 
 WARNING: `next_free` is for optimization. If it is invalid, the bitmap should be scanned instead.
@@ -71,7 +71,7 @@ typedef struct {
     uint64_t block_count; // Number of blocks allocated to the file
     // Header end
     uint64_t blocks[(GLFS_BLOCK_SIZE - 128) / 8]; // Array of block pointers
-} PACKED inode_t;
+} PACKED glfs_inode_t;
 
 typedef struct {
     uint64_t next_inode_block;
@@ -81,7 +81,7 @@ typedef struct {
     uint64_t skip_256;
     uint64_t skip_1024;
     uint64_t blocks[GLFS_BLOCK_SIZE / 8 - 6]; // Array of block pointers
-} PACKED inode_continuation_t;
+} PACKED glfs_inode_continuation_t;
 ```
 
 ### Dirents
@@ -93,7 +93,7 @@ A dirent stores a path segment, and an inode number. Dirents with an `inodeptr` 
 typedef struct {
     uint64_t inodeptr;
     char name[MAX_FILENAME_LENGTH];
-} PACKED dirent_t;
+} PACKED glfs_dirent_t;
 ```
 
 ## Maximum disk and file sizes
@@ -106,6 +106,10 @@ The maximum size of a file = the size of the drive - filesystem metadata, since 
 
 Recovery is, by design, not built into the mount or write operations. A `fsck` tool could search for stale inodes using their signatures, and follow existing dirents to fix bitmap corruption. The superblock contains minimal information, so it is possible to rebuild.
 
+## Implementation
+
+In this repository, there is a library to parse GlitchFS. It is very portable, using a block device abstraction, no global state and only freestanding C code. The environment has to provide `memset()`, `memcpy()`, `memcmp()` and `memmove()`, functions to read and write a 4096 byte sized buffer in an offset, (optionally) flush, and memory allocate/free. Look at tools/glfs-pack.c for an example on how to use the library.
+
 ## Status
 
-This filesystem is currently experimental. On-disk layout is unstable and may change.
+This filesystem is currently experimental. On-disk layout is partially stable. It may change, but structure sizes and field offsets will remain the same.

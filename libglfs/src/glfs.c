@@ -145,6 +145,7 @@ int glfs_mkfs(glfs_backing_t *backing, uint64_t volume_size) {
 
     res = backing->write_block(backing->data, 17 + bitmap_size, &root_inode);
     if (res < 0) return res;
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     return 0;
 }
 
@@ -164,6 +165,7 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
             mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
+            if (mount->backing.sync) mount->backing.sync(mount->backing.data);
             return 0; // Success
         }
     }
@@ -182,6 +184,7 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
             mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
+            if (mount->backing.sync) mount->backing.sync(mount->backing.data);
             return 0; // Success
         }
     }
@@ -205,6 +208,7 @@ int glfs_block_free(glfs_mount_t* mount, uint64_t block_number) {
         mount->superblock.next_free = block_number;
         mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
     }
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     return 0; // Success
 }
 
@@ -327,6 +331,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
         next_block = cont.next_inode_block;
     }
 
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     return count;
 }
 
@@ -458,6 +463,8 @@ int64_t glfs_write_inode(glfs_mount_t* mount, uint64_t inode_number, const uint8
 
         in_block_offset = 0;
     }
+
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     mount->backing.free(block_pointers);
     return bytes_written;
 }
@@ -656,17 +663,19 @@ static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_numb
 
     if (inode.type == GLFS_DIR && !allow_dirs) return -EISDIR;
 
+    // Increment inode refcount
+    inode.refcount++;
+    res = glfs_write_block(mount, inode_number, &inode);
+    if (res < 0) return res;
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
+
     // Write the dirent
     glfs_dirent_t new_dirent = {0};
     new_dirent.inodeptr = inode_number;
     memcpy(new_dirent.name, filename, GLFS_MAX_FILENAME_LENGTH);
     res = glfs_write_inode(mount, dir.inodeptr, (uint8_t*)(&new_dirent), dir_inode.size, 256);
     if (res < 0) return res;
-
-    // Increment inode refcount
-    inode.refcount++;
-    res = glfs_write_block(mount, inode_number, &inode);
-    if (res < 0) return res;
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
 
     return 0;
 }
@@ -761,14 +770,15 @@ int glfs_delete(glfs_mount_t* mount, const char *path) {
     dir_inode.size -= 256;
     res = glfs_write_block(mount, dir.inodeptr, &dir_inode);
     if (res < 0) return res;
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
 
     // Delete inode if refcount <= 1
-
     // In this section, there is no error handling
     // because the dirent is already removed,
     // and the inode can't be recovered on failure since its blocks
     // may have already been freed. The worst case is a stale inode or leaked blocks.
     if (inode.refcount <= 1) {
+        glfs_block_free(mount, dirent.inodeptr);
         for (int i = 0; i < sizeof(inode.blocks) / 8 && i < inode.block_count; i++) {
             if (inode.blocks[i] == 0) continue;
             glfs_block_free(mount, inode.blocks[i]);
@@ -787,11 +797,11 @@ int glfs_delete(glfs_mount_t* mount, const char *path) {
         }
         inode = (glfs_inode_t){0};
         glfs_write_block(mount, dirent.inodeptr, &inode);
-        glfs_block_free(mount, dirent.inodeptr);
     } else {
         inode.refcount--;
         glfs_write_block(mount, dirent.inodeptr, &inode);
     }
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
 
     return 0;
 }

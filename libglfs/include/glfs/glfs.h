@@ -47,6 +47,7 @@ typedef struct {
 
 int glfs_check(glfs_backing_t* backing);
 glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro);
+int glfs_unmount(glfs_mount_t* mount);
 int glfs_mkfs(glfs_backing_t* backing, uint64_t volume_size);
 
 int glfs_lookup(glfs_mount_t* mount, const char* path, uint64_t* inode_number);

@@ -75,6 +75,15 @@ glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro) {
     return mount;
 }
 
+int glfs_unmount(glfs_mount_t *mount) {
+    if (!mount) return -EINVAL;
+    mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
+    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
+    mount->backing.free(mount->block_bitmap);
+    mount->backing.free(mount);
+    return 0;
+}
+
 int glfs_mkfs(glfs_backing_t *backing, uint64_t volume_size) {
     if (volume_size < 19 * GLFS_BLOCK_SIZE) return -EINVAL;
     volume_size -= 16 * GLFS_BLOCK_SIZE; // Remove space for boot area
@@ -184,8 +193,6 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
             }
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
-            mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
-            if (mount->backing.sync) mount->backing.sync(mount->backing.data);
             return 0; // Success
         }
     }
@@ -207,9 +214,7 @@ int glfs_block_free(glfs_mount_t* mount, uint64_t block_number) {
     }
     if (block_number < mount->superblock.next_free) {
         mount->superblock.next_free = block_number;
-        mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
     }
-    if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     return 0; // Success
 }
 

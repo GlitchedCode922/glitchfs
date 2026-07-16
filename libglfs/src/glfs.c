@@ -174,8 +174,6 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
             }
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
-            mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
-            if (mount->backing.sync) mount->backing.sync(mount->backing.data);
             return 0; // Success
         }
     }

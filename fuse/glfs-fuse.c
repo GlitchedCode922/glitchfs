@@ -1,3 +1,4 @@
+#include <stdint.h>
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
 #include <stdio.h>
@@ -132,16 +133,30 @@ int glfs_fuse_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t
 }
 
 int glfs_fuse_read(const char* path, char* buf, size_t size, off_t offset, struct fuse_file_info* fi) {
-    return glfs_read(mount, fi->fh, buf, offset, size);
+    uint64_t handle;
+    if (fi && fi->fh) {
+        handle = fi->fh;
+    } else {
+        int res = glfs_lookup(mount, path, &handle);
+        if (res < 0) return res;
+    }
+    return glfs_read(mount, handle, buf, offset, size);
 }
 
 int glfs_fuse_write(const char* path, const char* buf, size_t size, off_t offset, struct fuse_file_info* fi) {
-    return glfs_write(mount, fi->fh, buf, offset, size);
+    uint64_t handle;
+    if (fi && fi->fh) {
+        handle = fi->fh;
+    } else {
+        int res = glfs_lookup(mount, path, &handle);
+        if (res < 0) return res;
+    }
+    return glfs_write(mount, handle, buf, offset, size);
 }
 
 int glfs_fuse_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
     struct fuse_context* ctx = fuse_get_context();
-    int res = glfs_mknod(mount, path, GLFS_REG, 0, mode & ~S_IFMT & ~ctx->umask, ctx->uid, ctx->gid);
+    int res = glfs_mknod(mount, path, GLFS_REG, 0, mode & 07777 & ~ctx->umask, ctx->uid, ctx->gid);
     if (res < 0) return res;
     res = glfs_lookup(mount, path, &fi->fh);
     if (res < 0) return res;
@@ -152,7 +167,7 @@ int glfs_fuse_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
 
 int glfs_fuse_mkdir(const char* path, mode_t mode) {
     struct fuse_context* ctx = fuse_get_context();
-    return glfs_mknod(mount, path, GLFS_DIR, 0, mode & ~S_IFMT & ~ctx->umask, ctx->uid, ctx->gid);
+    return glfs_mknod(mount, path, GLFS_DIR, 0, mode & 07777 & ~ctx->umask, ctx->uid, ctx->gid);
 }
 
 int glfs_fuse_link(const char* from, const char* to) {
@@ -211,7 +226,7 @@ int glfs_fuse_mknod(const char *path, mode_t mode, dev_t rdev) {
     }
 
     struct fuse_context* ctx = fuse_get_context();
-    return glfs_mknod(mount, path, type, rdev, mode & ~S_IFMT & ~ctx->umask, ctx->uid, ctx->gid);
+    return glfs_mknod(mount, path, type, rdev, mode & 07777 & ~ctx->umask, ctx->uid, ctx->gid);
 }
 
 int glfs_fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
@@ -223,6 +238,28 @@ int glfs_fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) 
         if (res < 0) return res;
     }
     return glfs_truncate(mount, handle, size);
+}
+
+int glfs_fuse_chmod(const char* path, mode_t mode, struct fuse_file_info *fi) {
+    uint64_t handle;
+    if (fi && fi->fh) {
+        handle = fi->fh;
+    } else {
+        int res = glfs_lookup(mount, path, &handle);
+        if (res < 0) return res;
+    }
+    return glfs_chmod(mount, handle, mode & 07777);
+}
+
+int glfs_fuse_chown(const char* path, uid_t uid, gid_t gid, struct fuse_file_info *fi) {
+    uint64_t handle;
+    if (fi && fi->fh) {
+        handle = fi->fh;
+    } else {
+        int res = glfs_lookup(mount, path, &handle);
+        if (res < 0) return res;
+    }
+    return glfs_chown(mount, handle, uid, gid);
 }
 
 void glfs_fuse_destroy(void *private_data) {
@@ -247,6 +284,8 @@ struct fuse_operations glfs_ops = {
     .rename = glfs_fuse_rename,
     .destroy = glfs_fuse_destroy,
     .truncate = glfs_fuse_truncate,
+    .chmod = glfs_fuse_chmod,
+    .chown = glfs_fuse_chown,
 };
 
 int main(int argc, char* argv[]) {

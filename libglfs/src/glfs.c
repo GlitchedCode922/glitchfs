@@ -858,3 +858,24 @@ int glfs_link(glfs_mount_t *mount, uint64_t inode_number, const char *link) {
 int glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t new_size) {
     return _glfs_truncate(mount, inode_number, new_size, 0);
 }
+
+int glfs_chmod(glfs_mount_t *mount, uint64_t inode_number, uint32_t permissions) {
+    glfs_inode_t inode;
+    int res = glfs_read_block(mount, inode_number, &inode);
+    if (res < 0) return res;
+    inode.perms = permissions;
+    res = glfs_write_block(mount, inode_number, &inode);
+    if (res < 0) return res;
+    return 0;
+}
+
+int glfs_chown(glfs_mount_t *mount, uint64_t inode_number, uint64_t uid, uint64_t gid) {
+    glfs_inode_t inode;
+    int res = glfs_read_block(mount, inode_number, &inode);
+    if (res < 0) return res;
+    inode.uid = uid;
+    inode.gid = gid;
+    res = glfs_write_block(mount, inode_number, &inode);
+    if (res < 0) return res;
+    return 0;
+}

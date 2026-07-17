@@ -66,3 +66,5 @@ int glfs_rename(glfs_mount_t* mount, const char* old_path, const char* new_path)
 int glfs_mknod(glfs_mount_t* mount, const char* path, uint32_t type, uint64_t dev, uint32_t permissions, uint64_t uid, uint64_t gid);
 int glfs_link(glfs_mount_t* mount, uint64_t inode_number, const char* link);
 int glfs_truncate(glfs_mount_t* mount, uint64_t inode_number, uint64_t new_size);
+int glfs_chmod(glfs_mount_t* mount, uint64_t inode_number, uint32_t permissions);
+int glfs_chown(glfs_mount_t* mount, uint64_t inode_number, uint64_t uid, uint64_t gid);

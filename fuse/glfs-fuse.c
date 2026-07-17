@@ -212,6 +212,17 @@ int glfs_fuse_mknod(const char *path, mode_t mode, dev_t rdev) {
     return glfs_mknod(mount, path, type, rdev);
 }
 
+int glfs_fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) {
+    uint64_t handle;
+    if (fi && fi->fh) {
+        handle = fi->fh;
+    } else {
+        int res = glfs_lookup(mount, path, &handle);
+        if (res < 0) return res;
+    }
+    return glfs_truncate(mount, handle, size);
+}
+
 void glfs_fuse_destroy(void *private_data) {
     glfs_unmount(mount);
 }
@@ -233,6 +244,7 @@ struct fuse_operations glfs_ops = {
     .mknod = glfs_fuse_mknod,
     .rename = glfs_fuse_rename,
     .destroy = glfs_fuse_destroy,
+    .truncate = glfs_fuse_truncate,
 };
 
 int main(int argc, char* argv[]) {

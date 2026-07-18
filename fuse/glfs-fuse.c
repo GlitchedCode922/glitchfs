@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <glfs/glfs.h>
+#include <time.h>
 
 glfs_mount_t* mount;
 
@@ -288,6 +289,10 @@ struct fuse_operations glfs_ops = {
     .chown = glfs_fuse_chown,
 };
 
+uint64_t glfs_fuse_get_time() {
+    return time(NULL);
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 3) {
         printf("Usage: %s file mountpoint\n", argv[0]);
@@ -305,6 +310,7 @@ int main(int argc, char* argv[]) {
         .read_block = read_block,
         .write_block = write_block,
         .sync = glfs_sync,
+        .time = glfs_fuse_get_time,
         .alloc = malloc,
         .free = free,
     };

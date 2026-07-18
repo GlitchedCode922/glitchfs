@@ -35,6 +35,7 @@ typedef struct {
     int64_t (*read_block)(void* data, uint64_t block_number, void* buffer); // Absolute block R/W, no translation, 0-based
     int64_t (*write_block)(void* data, uint64_t block_number, const void* buffer); // Absolute block R/W, no translation, 0-based
     void (*sync)(void* data);
+    uint64_t (*time)(void);
     void *(*alloc)(uint64_t size);
     void (*free)(void* ptr);
 } glfs_backing_t;

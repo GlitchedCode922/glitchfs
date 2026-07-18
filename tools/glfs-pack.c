@@ -6,6 +6,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <time.h>
 
 int64_t read_block(void* fp, uint64_t block_number, void* buffer) {
     fseek(fp, block_number * GLFS_BLOCK_SIZE, SEEK_SET);
@@ -118,6 +119,10 @@ int walk(glfs_mount_t* mount, const char* host_path, const char* glfs_path) {
     return 0;
 }
 
+uint64_t glfs_get_time() {
+    return time(NULL);
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 3) {
         fprintf(stderr, "Usage: %s <directory> <output_file>\n", argv[0]);
@@ -138,6 +143,7 @@ int main(int argc, char *argv[]) {
         .read_block = read_block,
         .write_block = write_block,
         .sync = glfs_sync,
+        .time = glfs_get_time,
         .alloc = malloc,
         .free = free,
     };

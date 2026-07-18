@@ -108,7 +108,7 @@ Recovery is, by design, not built into the mount or write operations. A `fsck` t
 
 ## Implementation
 
-In this repository, there is a library to parse GlitchFS. It is very portable, using a block device abstraction, no global state and only freestanding C code. The environment has to provide `memset()`, `memcpy()`, `memcmp()` and `memmove()`, functions to read and write a 4096 byte sized buffer in an offset, (optionally) flush, and memory allocate/free. Look at tools/glfs-pack.c for an example on how to use the library.
+In this repository, there is a library to parse GlitchFS. It is very portable, using a block device abstraction, no global state and only freestanding C code. The environment has to provide `memset()`, `memcpy()`, `memcmp()` and `memmove()`, functions to read and write a 4096 byte sized buffer in an offset, memory allocate/free and optionally flush and function to get the current Unix timestamp. Look at fuse/glfs-fuse.c for an example on how to use the library.
 
 ## Status
 

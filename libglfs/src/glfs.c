@@ -1,3 +1,4 @@
+
 #include "glfs/glfs.h"
 #include "glfs/layout.h"
 #include "glfs/error.h"
@@ -17,14 +18,14 @@ static size_t glfs_strlen(const char *s) {
 }
 
 int glfs_read_block(glfs_mount_t* mount, uint64_t block_number, void* buffer) {
-    if (block_number == 0 || block_number >= mount->superblock.block_count) return -EIO;
+    if (block_number == 0 || block_number > mount->superblock.block_count) return -EIO;
     uint64_t absolute_block = 17 + mount->superblock.bitmap_size + block_number - 1;
     return mount->backing.read_block(mount->backing.data, absolute_block, buffer);
 }
 
 int glfs_write_block(glfs_mount_t* mount, uint64_t block_number, void* buffer) {
     if (mount->read_only) return -EROFS;
-    if (block_number == 0 || block_number >= mount->superblock.block_count) return -EIO;
+    if (block_number == 0 || block_number > mount->superblock.block_count) return -EIO;
     uint64_t absolute_block = 17 + mount->superblock.bitmap_size + block_number - 1;
     return mount->backing.write_block(mount->backing.data, absolute_block, buffer);
 }
@@ -44,6 +45,7 @@ glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro) {
     if (glfs_check(backing) <= 0) return NULL;
     glfs_mount_t* mount = backing->alloc(sizeof(glfs_mount_t));
     if (!mount) return NULL;
+    memset(mount, 0, sizeof(glfs_mount_t));
     mount->backing = *backing;
     mount->read_only = ro;
     memset(mount->open_files, 0, sizeof(mount->open_files));
@@ -63,10 +65,18 @@ glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro) {
         backing->free(mount);
         return NULL;
     }
+    mount->dirty_blocks = backing->alloc((mount->superblock.bitmap_size + 7) / 8);
+    if (!mount->dirty_blocks) {
+        backing->free(mount->block_bitmap);
+        backing->free(mount);
+        return NULL;
+    }
+    memset(mount->dirty_blocks, 0, (mount->superblock.bitmap_size + 7) / 8);
     for (uint64_t i = 0; i < mount->superblock.bitmap_size; i++) {
         res = backing->read_block(backing->data, 17 + i, &mount->block_bitmap[i * GLFS_BLOCK_SIZE]);
         if (res < 0) {
             backing->free(mount->block_bitmap);
+            backing->free(mount->dirty_blocks);
             backing->free(mount);
             return NULL;
         }
@@ -80,6 +90,7 @@ int glfs_unmount(glfs_mount_t *mount) {
     mount->backing.write_block(mount->backing.data, 16, &mount->superblock);
     if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     mount->backing.free(mount->block_bitmap);
+    mount->backing.free(mount->dirty_blocks);
     mount->backing.free(mount);
     return 0;
 }
@@ -159,18 +170,22 @@ int glfs_mkfs(glfs_backing_t *backing, uint64_t volume_size) {
     return 0;
 }
 
-int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
+int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number, uint8_t write_to_disk) {
     if (mount->read_only) return -EROFS;
     for (uint64_t i = mount->superblock.next_free == 0 ? 0 : mount->superblock.next_free - 1; i < mount->superblock.block_count; i++) {
         uint8_t byte = mount->block_bitmap[i / 8];
         if (!(byte & (1 << (i % 8)))) {
             // Found a free block
             mount->block_bitmap[i / 8] |= (1 << (i % 8)); // Mark as used
-            // Write the updated bitmap back to disk
-            int res = mount->backing.write_block(mount->backing.data, 17 + (i / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(i / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
-            if (res < 0) {
-                mount->block_bitmap[i / 8] &= ~(1 << (i % 8));
-                return res;
+            if (write_to_disk) {
+                // Write the updated bitmap back to disk
+                int res = mount->backing.write_block(mount->backing.data, 17 + (i / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(i / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
+                if (res < 0) {
+                    mount->block_bitmap[i / 8] &= ~(1 << (i % 8));
+                    return res;
+                }
+            } else {
+                mount->dirty_blocks[(i / (GLFS_BLOCK_SIZE * 8)) / 8] |= 1 << ((i / (GLFS_BLOCK_SIZE * 8)) % 8);
             }
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
@@ -183,11 +198,15 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
         if (!(byte & (1 << (i % 8)))) {
             // Found a free block
             mount->block_bitmap[i / 8] |= (1 << (i % 8)); // Mark as used
-            // Write the updated bitmap back to disk
-            int res = mount->backing.write_block(mount->backing.data, 17 + (i / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(i / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
-            if (res < 0) {
-                mount->block_bitmap[i / 8] &= ~(1 << (i % 8));
-                return res;
+            if (write_to_disk) {
+                // Write the updated bitmap back to disk
+                int res = mount->backing.write_block(mount->backing.data, 17 + (i / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(i / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
+                if (res < 0) {
+                    mount->block_bitmap[i / 8] &= ~(1 << (i % 8));
+                    return res;
+                }
+            } else {
+                mount->dirty_blocks[(i / (GLFS_BLOCK_SIZE * 8)) / 8] |= 1 << ((i / (GLFS_BLOCK_SIZE * 8)) % 8);
             }
             *block_number = i + 1; // Block numbers start at 1
             mount->superblock.next_free = *block_number + 1;
@@ -197,23 +216,63 @@ int glfs_block_alloc(glfs_mount_t* mount, uint64_t* block_number) {
     return -ENOSPC; // No space left on device
 }
 
-int glfs_block_free(glfs_mount_t* mount, uint64_t block_number) {
+int glfs_block_free(glfs_mount_t* mount, uint64_t block_number, uint8_t write_to_disk) {
     if (mount->read_only) return -EROFS;
     if (block_number == 0 || block_number > mount->superblock.block_count) {
         return -EINVAL; // Invalid block number
     }
     uint64_t index = block_number - 1;
     mount->block_bitmap[index / 8] &= ~(1 << (index % 8)); // Mark as free
-    // Write the updated bitmap back to disk
-    int res = mount->backing.write_block(mount->backing.data, 17 + (index / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(index / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
-    if (res < 0) {
-        mount->block_bitmap[index / 8] |= (1 << (index % 8));
-        return res;
+    if (write_to_disk) {
+        // Write the updated bitmap back to disk
+        int res = mount->backing.write_block(mount->backing.data, 17 + (index / (GLFS_BLOCK_SIZE * 8)), &mount->block_bitmap[(index / (GLFS_BLOCK_SIZE * 8)) * GLFS_BLOCK_SIZE]);
+        if (res < 0) {
+            mount->block_bitmap[index / 8] |= 1 << (index % 8);
+            return res;
+        }
+    } else {
+        mount->dirty_blocks[(index / (GLFS_BLOCK_SIZE * 8)) / 8] |= 1 << ((index / (GLFS_BLOCK_SIZE * 8)) % 8);
     }
     if (block_number < mount->superblock.next_free) {
         mount->superblock.next_free = block_number;
     }
     return 0; // Success
+}
+
+int glfs_flush_bitmap(glfs_mount_t* mount) {
+    if (mount->read_only) return -EROFS;
+
+    uint64_t dirty_bytes = (mount->superblock.bitmap_size + 7) / 8;
+    int dirty = 0;
+
+    for (uint64_t byte = 0; byte < dirty_bytes; byte++) {
+        uint8_t flags = mount->dirty_blocks[byte];
+
+        if (!flags) continue;
+
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            if (!(flags & (1 << bit))) continue;
+
+            uint64_t bitmap_block = byte * 8 + bit;
+
+            if (bitmap_block >= mount->superblock.bitmap_size) break;
+
+            int res = mount->backing.write_block(
+                mount->backing.data,
+                17 + bitmap_block,
+                &mount->block_bitmap[bitmap_block * GLFS_BLOCK_SIZE]
+            );
+
+            if (res < 0) return res;
+
+            mount->dirty_blocks[byte] &= ~(1 << bit);
+            dirty = 1;
+        }
+    }
+
+    if (dirty && mount->backing.sync) mount->backing.sync(mount->backing.data);
+
+    return 0;
 }
 
 int glfs_read_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint64_t offset, uint64_t* block_ptrs, size_t size) {
@@ -303,7 +362,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
             if (res < 0) return res;
         } else {
             uint64_t new_block;
-            res = glfs_block_alloc(mount, &new_block);
+            res = glfs_block_alloc(mount, &new_block, 1);
             if (res < 0) return res;
             if (previous_block) {
                 cont.next_inode_block = new_block;
@@ -361,20 +420,30 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
         uint64_t* pointers = mount->backing.alloc(difference * 8);
         if (!pointers) return -ENOMEM;
         for (int i = 0; i < difference; i++) {
-            res = glfs_block_alloc(mount, pointers + i);
+            res = glfs_block_alloc(mount, pointers + i, 0);
             if (res < 0) {
                 for (int j = 0; j < i; j++) {
-                    glfs_block_free(mount, pointers[j]);
+                    glfs_block_free(mount, pointers[j], 0);
                 }
                 mount->backing.free(pointers);
                 return res;
             }
         }
+        res = glfs_flush_bitmap(mount);
+        if (res < 0) {
+            for (int i = 0; i < difference; i++) {
+                glfs_block_free(mount, pointers[i], 0);
+            }
+            glfs_flush_bitmap(mount);
+            mount->backing.free(pointers);
+            return res;
+        }
         res = glfs_write_inode_block_ptrs(mount, inode_number, original_block_count, pointers, difference);
         if (res < 0) {
             for (int i = 0; i < difference; i++) {
-                glfs_block_free(mount, pointers[i]);
+                glfs_block_free(mount, pointers[i], 0);
             }
+            glfs_flush_bitmap(mount);
             mount->backing.free(pointers);
             return res;
         }
@@ -389,7 +458,12 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
             return res;
         }
         for (int i = 0; i < difference; i++) {
-            glfs_block_free(mount, pointers[i]);
+            glfs_block_free(mount, pointers[i], 0);
+        }
+        res = glfs_flush_bitmap(mount);
+        if (res < 0) {
+            mount->backing.free(pointers);
+            return res;
         }
         mount->backing.free(pointers);
     }
@@ -438,7 +512,7 @@ int64_t glfs_read(glfs_mount_t* mount, uint64_t inode_number, void* buffer, uint
         in_block_offset = 0;
     }
     mount->backing.free(block_pointers);
-    if (mount->backing.time) {
+    if (mount->backing.time && !mount->read_only) {
         inode.atime = mount->backing.time();
         glfs_write_block(mount, inode_number, &inode);
     }
@@ -577,13 +651,14 @@ static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
     glfs_inode_t inode;
     int res = glfs_read_block(mount, inode_number, &inode);
     if (res < 0) return res;
-    glfs_block_free(mount, inode_number);
+    glfs_block_free(mount, inode_number, 1);
     uint64_t blocks_visited = 0;
     for (int i = 0; i < sizeof(inode.blocks) / 8 && i < inode.block_count; i++) {
         blocks_visited++;
         if (inode.blocks[i] == 0) continue;
-        glfs_block_free(mount, inode.blocks[i]);
+        glfs_block_free(mount, inode.blocks[i], 0);
     }
+    glfs_flush_bitmap(mount);
     glfs_inode_continuation_t cont;
     cont.next_inode_block = inode.next_inode_block;
     while (cont.next_inode_block) {
@@ -593,10 +668,11 @@ static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
         for (int i = 0; i < sizeof(cont.blocks) / 8 && blocks_visited < inode.block_count; i++) {
             blocks_visited++;
             if (cont.blocks[i] == 0) continue;
-            glfs_block_free(mount, cont.blocks[i]);
+            glfs_block_free(mount, cont.blocks[i], 0);
         }
-        glfs_block_free(mount, current);
+        glfs_block_free(mount, current, 0);
     }
+    glfs_flush_bitmap(mount);
     inode = (glfs_inode_t){0};
     glfs_write_block(mount, inode_number, &inode);
     if (mount->backing.sync) mount->backing.sync(mount->backing.data);
@@ -604,13 +680,13 @@ static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
 }
 
 int glfs_open(glfs_mount_t* mount, uint64_t inode_number) {
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 4096; i++) {
         if (mount->open_files[i].inode == inode_number) {
             mount->open_files[i].opencount++;
             return 0;
         }
     }
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 4096; i++) {
         if (mount->open_files[i].inode == 0) {
             mount->open_files[i].inode = inode_number;
             mount->open_files[i].opencount++;
@@ -621,7 +697,7 @@ int glfs_open(glfs_mount_t* mount, uint64_t inode_number) {
 }
 
 int glfs_close(glfs_mount_t* mount, uint64_t inode_number) {
-    for (int i = 0; i < 512; i++) {
+    for (int i = 0; i < 4096; i++) {
         if (mount->open_files[i].inode == inode_number) {
             if (--mount->open_files[i].opencount == 0) {
                 glfs_inode_t inode;
@@ -756,7 +832,7 @@ int glfs_mknod(glfs_mount_t* mount, const char *path, uint32_t type, uint64_t de
     if (!path) return -EINVAL;
     uint64_t inode_number;
     glfs_inode_t inode = {0};
-    int res = glfs_block_alloc(mount, &inode_number);
+    int res = glfs_block_alloc(mount, &inode_number, 1);
     if (res < 0) return res;
     uint64_t sig;
     memcpy(&sig, "GLFS_INO", 8);
@@ -775,11 +851,11 @@ int glfs_mknod(glfs_mount_t* mount, const char *path, uint32_t type, uint64_t de
     }
     res = glfs_write_block(mount, inode_number, &inode);
     if (res < 0) {
-        glfs_block_free(mount, inode_number);
+        glfs_block_free(mount, inode_number, 1);
         return res;
     }
     res = _glfs_link(mount, path, inode_number, 1);
-    if (res < 0) glfs_block_free(mount, inode_number);
+    if (res < 0) glfs_block_free(mount, inode_number, 1);
     return res;
 }
 

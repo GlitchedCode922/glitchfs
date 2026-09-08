@@ -44,7 +44,8 @@ typedef struct {
     glfs_superblock_t superblock;
     glfs_backing_t backing;
     uint8_t* block_bitmap;
-    glfs_open_file_t open_files[512];
+    uint8_t* dirty_blocks;
+    glfs_open_file_t open_files[4096];
     uint8_t read_only;
 } glfs_mount_t;
 

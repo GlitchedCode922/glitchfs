@@ -466,6 +466,20 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
             return res;
         }
         mount->backing.free(pointers);
+        if (required_block_count > 0 && new_size % GLFS_BLOCK_SIZE) {
+            uint64_t last_block;
+            res = glfs_read_inode_block_ptrs(mount, inode_number, required_block_count - 1, &last_block, 1);
+            if (res < 0) return 0;
+            uint8_t block_buffer[GLFS_BLOCK_SIZE];
+            res = glfs_read_block(mount, last_block, block_buffer);
+            if (res < 0) return 0;
+            memset(
+                block_buffer + (new_size % GLFS_BLOCK_SIZE), 0,
+                GLFS_BLOCK_SIZE - (new_size % GLFS_BLOCK_SIZE)
+            );
+            res = glfs_write_block(mount, last_block, block_buffer);
+            if (res < 0) return 0;
+        }
     }
     return 0;
 }

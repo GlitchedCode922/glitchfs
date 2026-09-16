@@ -1,4 +1,3 @@
-
 #include "glfs/glfs.h"
 #include "glfs/layout.h"
 #include "glfs/error.h"
@@ -423,6 +422,15 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
             res = glfs_block_alloc(mount, pointers + i, 0);
             if (res < 0) {
                 for (int j = 0; j < i; j++) {
+                    glfs_block_free(mount, pointers[j], 0);
+                }
+                mount->backing.free(pointers);
+                return res;
+            }
+            uint8_t empty_block[4096] = {0};
+            res = glfs_write_block(mount, pointers[i], empty_block);
+            if (res < 0) {
+                for (int j = 0; j <= i; j++) {
                     glfs_block_free(mount, pointers[j], 0);
                 }
                 mount->backing.free(pointers);

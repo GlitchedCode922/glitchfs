@@ -103,7 +103,7 @@ int walk(glfs_mount_t* mount, const char* host_path, const char* glfs_path) {
                 return 1;
             }
             uint64_t inode;
-            res = glfs_lookup(mount, glfs_child, &inode);
+            res = glfs_lookup_path(mount, glfs_child, &inode);
             if (res < 0) {
                 fprintf(stderr, "Error: %s\n", strerror(-res));
                 return 1;

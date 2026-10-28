@@ -47,7 +47,7 @@ int glfs_fuse_getattr(const char* path, struct stat* st, struct fuse_file_info* 
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     int res = glfs_getattr(mount, handle, &attr);
@@ -73,7 +73,7 @@ int glfs_fuse_getattr(const char* path, struct stat* st, struct fuse_file_info* 
 }
 
 int glfs_fuse_open(const char* path, struct fuse_file_info *fi) {
-    int res = glfs_lookup(mount, path, &fi->fh);
+    int res = glfs_lookup_path(mount, path, &fi->fh);
     if (res < 0) return res;
     res = glfs_open(mount, fi->fh);
     if (res < 0) return res;
@@ -81,7 +81,7 @@ int glfs_fuse_open(const char* path, struct fuse_file_info *fi) {
 }
 
 int glfs_fuse_opendir(const char* path, struct fuse_file_info *fi) {
-    int res = glfs_lookup(mount, path, &fi->fh);
+    int res = glfs_lookup_path(mount, path, &fi->fh);
     if (res < 0) return res;
     glfs_attr_t attr;
     res = glfs_getattr(mount, fi->fh, &attr);
@@ -109,7 +109,7 @@ int glfs_fuse_readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     if (offset <= 0) {
@@ -138,7 +138,7 @@ int glfs_fuse_read(const char* path, char* buf, size_t size, off_t offset, struc
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     return glfs_read(mount, handle, buf, offset, size);
@@ -149,7 +149,7 @@ int glfs_fuse_write(const char* path, const char* buf, size_t size, off_t offset
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     return glfs_write(mount, handle, buf, offset, size);
@@ -159,7 +159,7 @@ int glfs_fuse_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
     struct fuse_context* ctx = fuse_get_context();
     int res = glfs_mknod(mount, path, GLFS_REG, 0, mode & 07777 & ~ctx->umask, ctx->uid, ctx->gid);
     if (res < 0) return res;
-    res = glfs_lookup(mount, path, &fi->fh);
+    res = glfs_lookup_path(mount, path, &fi->fh);
     if (res < 0) return res;
     res = glfs_open(mount, fi->fh);
     if (res < 0) return res;
@@ -173,14 +173,14 @@ int glfs_fuse_mkdir(const char* path, mode_t mode) {
 
 int glfs_fuse_link(const char* from, const char* to) {
     uint64_t handle;
-    int res = glfs_lookup(mount, from, &handle);
+    int res = glfs_lookup_path(mount, from, &handle);
     if (res < 0) return res;
     return glfs_link(mount, handle, to);
 }
 
 int glfs_fuse_unlink(const char *path) {
     uint64_t handle;
-    int res = glfs_lookup(mount, path, &handle);
+    int res = glfs_lookup_path(mount, path, &handle);
     if (res < 0) return res;
     glfs_attr_t attr;
     res = glfs_getattr(mount, handle, &attr);
@@ -191,7 +191,7 @@ int glfs_fuse_unlink(const char *path) {
 
 int glfs_fuse_rmdir(const char *path) {
     uint64_t handle;
-    int res = glfs_lookup(mount, path, &handle);
+    int res = glfs_lookup_path(mount, path, &handle);
     if (res < 0) return res;
     glfs_attr_t attr;
     res = glfs_getattr(mount, handle, &attr);
@@ -235,7 +235,7 @@ int glfs_fuse_truncate(const char *path, off_t size, struct fuse_file_info *fi) 
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     return glfs_truncate(mount, handle, size);
@@ -246,7 +246,7 @@ int glfs_fuse_chmod(const char* path, mode_t mode, struct fuse_file_info *fi) {
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     return glfs_chmod(mount, handle, mode & 07777);
@@ -257,7 +257,7 @@ int glfs_fuse_chown(const char* path, uid_t uid, gid_t gid, struct fuse_file_inf
     if (fi && fi->fh) {
         handle = fi->fh;
     } else {
-        int res = glfs_lookup(mount, path, &handle);
+        int res = glfs_lookup_path(mount, path, &handle);
         if (res < 0) return res;
     }
     return glfs_chown(mount, handle, uid, gid);

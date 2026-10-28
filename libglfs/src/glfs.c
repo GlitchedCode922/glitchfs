@@ -16,6 +16,18 @@ static size_t glfs_strlen(const char *s) {
     return len;
 }
 
+static int glfs_strncmp(const char *s1, const char *s2, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (s1[i] != s2[i]) {
+            return (unsigned char)s1[i] - (unsigned char)s2[i];
+        }
+        if (s1[i] == '\0') {
+            return 0;
+        }
+    }
+    return 0;
+}
+
 int glfs_read_block(glfs_mount_t* mount, uint64_t block_number, void* buffer) {
     if (block_number == 0 || block_number > mount->superblock.block_count) return -EIO;
     uint64_t absolute_block = 17 + mount->superblock.bitmap_size + block_number - 1;
@@ -652,7 +664,39 @@ int glfs_get_dirent(glfs_mount_t* mount, const char* path, glfs_dirent_ref_t* p_
     return 0;
 }
 
-int glfs_lookup(glfs_mount_t *mount, const char *path, uint64_t *inode) {
+int glfs_lookup(glfs_mount_t *mount, const char* name, uint64_t parent, uint64_t *inode) {
+    if (!name) return -EINVAL;
+    if (!inode) return -EINVAL;
+    if (!parent) return -EINVAL;
+
+    glfs_inode_t parent_inode;
+    int res = glfs_read_block(mount, parent, &parent_inode);
+    if (res < 0) return res;
+
+    if (parent_inode.type != GLFS_DIR) return -EINVAL;
+
+    glfs_dirent_t* dirents = mount->backing.alloc(parent_inode.size);
+    if (!dirents) return -ENOMEM;
+    res = glfs_read(mount, parent, dirents, 0, parent_inode.size);
+    if (res < 0) {
+        mount->backing.free(dirents);
+        return res;
+    }
+    if (res != parent_inode.size) return -EIO;
+
+    for (size_t dirent_index = 0; dirent_index < parent_inode.size / 256; dirent_index++) {
+        if (glfs_strncmp(dirents[dirent_index].name, name, GLFS_MAX_FILENAME_LENGTH) == 0) {
+            // Found
+            *inode = dirents[dirent_index].inodeptr;
+            mount->backing.free(dirents);
+            return 0;
+        }
+    }
+    mount->backing.free(dirents);
+    return -ENOENT;
+}
+
+int glfs_lookup_path(glfs_mount_t *mount, const char *path, uint64_t *inode) {
     if (!path) return -EINVAL;
     if (!inode) return -EINVAL;
     glfs_dirent_ref_t dirent_ref;
@@ -783,7 +827,7 @@ static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_numb
     if (mount->read_only) return -EROFS;
     if (!path) return -EINVAL;
     uint64_t tmp;
-    if (glfs_lookup(mount, path, &tmp) >= 0) return -EEXIST;
+    if (glfs_lookup_path(mount, path, &tmp) >= 0) return -EEXIST;
     size_t len = glfs_strlen(path);
     while (len > 0 && path[len - 1] == '/') {
         len--;

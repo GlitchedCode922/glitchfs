@@ -680,6 +680,10 @@ int glfs_get_dirent(glfs_mount_t* mount, const char* path, glfs_dirent_ref_t* p_
     return 0;
 }
 
+uint64_t glfs_get_root(glfs_mount_t *mount) {
+    return mount->superblock.root_inode;
+}
+
 int glfs_lookup(glfs_mount_t *mount, const char* name, uint64_t parent, uint64_t *inode) {
     if (!name) return -EINVAL;
     if (!inode) return -EINVAL;

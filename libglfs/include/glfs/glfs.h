@@ -57,6 +57,7 @@ glfs_mount_t* glfs_mount(glfs_backing_t* backing, int ro);
 int glfs_unmount(glfs_mount_t* mount);
 int glfs_mkfs(glfs_backing_t* backing, uint64_t volume_size);
 
+uint64_t glfs_get_root(glfs_mount_t *mount);
 int glfs_lookup(glfs_mount_t* mount, const char* name, uint64_t parent_inode, uint64_t* inode_number);
 int glfs_lookup_path(glfs_mount_t* mount, const char* path, uint64_t* inode_number);
 

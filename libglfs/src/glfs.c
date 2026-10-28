@@ -689,7 +689,7 @@ int glfs_lookup(glfs_mount_t *mount, const char* name, uint64_t parent, uint64_t
     int res = glfs_read_block(mount, parent, &parent_inode, 1);
     if (res < 0) return res;
 
-    if (parent_inode.type != GLFS_DIR) return -EINVAL;
+    if (parent_inode.type != GLFS_DIR) return -ENOTDIR;
 
     glfs_dirent_t* dirents = mount->backing.alloc(parent_inode.size);
     if (!dirents) return -ENOMEM;

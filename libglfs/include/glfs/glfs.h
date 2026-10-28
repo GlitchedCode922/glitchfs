@@ -46,6 +46,9 @@ typedef struct {
     uint8_t* block_bitmap;
     uint8_t* dirty_blocks;
     glfs_open_file_t open_files[4096];
+    uint8_t use_cache;
+    uint64_t cached_block_number;
+    uint8_t cached_block[GLFS_BLOCK_SIZE];
     uint8_t read_only;
 } glfs_mount_t;
 

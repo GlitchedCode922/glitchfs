@@ -28,17 +28,33 @@ static int glfs_strncmp(const char *s1, const char *s2, size_t n) {
     return 0;
 }
 
-int glfs_read_block(glfs_mount_t* mount, uint64_t block_number, void* buffer) {
+int glfs_read_block(glfs_mount_t* mount, uint64_t block_number, void* buffer, int cache) {
     if (block_number == 0 || block_number > mount->superblock.block_count) return -EIO;
     uint64_t absolute_block = 17 + mount->superblock.bitmap_size + block_number - 1;
-    return mount->backing.read_block(mount->backing.data, absolute_block, buffer);
+    if (block_number == mount->cached_block_number) {
+        memcpy(buffer, mount->cached_block, GLFS_BLOCK_SIZE);
+        return 0;
+    }
+    int res = mount->backing.read_block(mount->backing.data, absolute_block, buffer);
+    if (res < 0) return res;
+    if (cache && mount->use_cache) {
+        mount->cached_block_number = block_number;
+        memcpy(mount->cached_block, buffer, GLFS_BLOCK_SIZE);
+    }
+    return res;
 }
 
-int glfs_write_block(glfs_mount_t* mount, uint64_t block_number, void* buffer) {
+int glfs_write_block(glfs_mount_t* mount, uint64_t block_number, void* buffer, int cache) {
     if (mount->read_only) return -EROFS;
     if (block_number == 0 || block_number > mount->superblock.block_count) return -EIO;
     uint64_t absolute_block = 17 + mount->superblock.bitmap_size + block_number - 1;
-    return mount->backing.write_block(mount->backing.data, absolute_block, buffer);
+    int res = mount->backing.write_block(mount->backing.data, absolute_block, buffer);
+    if (res < 0) return res;
+    if (block_number == mount->cached_block_number || (cache && mount->use_cache)) {
+        mount->cached_block_number = block_number;
+        memcpy(mount->cached_block, buffer, GLFS_BLOCK_SIZE);
+    }
+    return res;
 }
 
 int glfs_check(glfs_backing_t* backing) {
@@ -289,7 +305,7 @@ int glfs_flush_bitmap(glfs_mount_t* mount) {
 int glfs_read_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint64_t offset, uint64_t* block_ptrs, size_t size) {
     glfs_inode_t inode;
     glfs_inode_continuation_t cont;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
 
     size_t count = 0;
@@ -313,7 +329,7 @@ int glfs_read_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint6
 
     uint64_t next_block = inode.next_inode_block;
     while (next_block != 0 && count < size) {
-        res = glfs_read_block(mount, next_block, &cont);
+        res = glfs_read_block(mount, next_block, &cont, 0);
         if (res < 0) return res;
 
         if (skip < cont_ptrs) {
@@ -335,7 +351,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
     if (mount->read_only) return -EROFS;
     glfs_inode_t inode;
     glfs_inode_continuation_t cont;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
 
     size_t count = 0;
@@ -346,7 +362,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
 
     if (offset + size > inode.block_count) {
         inode.block_count = offset + size;
-        int res = glfs_write_block(mount, inode_number, &inode);
+        int res = glfs_write_block(mount, inode_number, &inode, 0);
         if (res < 0) return res;
     }
 
@@ -354,7 +370,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
         for (size_t i = skip; i < inode_ptrs && count < size; i++) {
             inode.blocks[i] = block_ptrs[count++];
         }
-        res = glfs_write_block(mount, inode_number, &inode);
+        res = glfs_write_block(mount, inode_number, &inode, 0);
         if (res < 0) return res;
         skip = 0;
     } else {
@@ -369,7 +385,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
     uint64_t next_block = inode.next_inode_block;
     while (count < size) {
         if (next_block) {
-            res = glfs_read_block(mount, next_block, &cont);
+            res = glfs_read_block(mount, next_block, &cont, 0);
             if (res < 0) return res;
         } else {
             uint64_t new_block;
@@ -377,16 +393,16 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
             if (res < 0) return res;
             if (previous_block) {
                 cont.next_inode_block = new_block;
-                res = glfs_write_block(mount, previous_block, &cont);
+                res = glfs_write_block(mount, previous_block, &cont, 0);
                 if (res < 0) return res;
             } else {
                 inode.next_inode_block = new_block;
-                res = glfs_write_block(mount, inode_number, &inode);
+                res = glfs_write_block(mount, inode_number, &inode, 0);
                 if (res < 0) return res;
             }
             next_block = new_block;
             memset(&cont, 0, GLFS_BLOCK_SIZE);
-            res = glfs_write_block(mount, next_block, &cont);
+            res = glfs_write_block(mount, next_block, &cont, 0);
             if (res < 0) return res;
         }
 
@@ -394,7 +410,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
             for (size_t i = skip; i < cont_ptrs && count < size; i++) {
                 cont.blocks[i] = block_ptrs[count++];
             }
-            res = glfs_write_block(mount, next_block, &cont);
+            res = glfs_write_block(mount, next_block, &cont, 0);
             if (res < 0) return res;
             skip = 0;
         } else {
@@ -412,7 +428,7 @@ int glfs_write_inode_block_ptrs(glfs_mount_t* mount, uint64_t inode_number, uint
 static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t new_size, int allow_dirs) {
     if (mount->read_only) return -EROFS;
     glfs_inode_t inode = {0};
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
 
     if (inode.type == GLFS_DIR && !allow_dirs) return -EISDIR;
@@ -424,7 +440,7 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
         inode.ctime = mount->backing.time();
         inode.mtime = mount->backing.time();
     }
-    res = glfs_write_block(mount, inode_number, &inode);
+    res = glfs_write_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
     if (original_block_count < required_block_count) {
         uint64_t difference = required_block_count - original_block_count;
@@ -440,7 +456,7 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
                 return res;
             }
             uint8_t empty_block[4096] = {0};
-            res = glfs_write_block(mount, pointers[i], empty_block);
+            res = glfs_write_block(mount, pointers[i], empty_block, 0);
             if (res < 0) {
                 for (int j = 0; j <= i; j++) {
                     glfs_block_free(mount, pointers[j], 0);
@@ -491,13 +507,13 @@ static int _glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t n
             res = glfs_read_inode_block_ptrs(mount, inode_number, required_block_count - 1, &last_block, 1);
             if (res < 0) return 0;
             uint8_t block_buffer[GLFS_BLOCK_SIZE];
-            res = glfs_read_block(mount, last_block, block_buffer);
+            res = glfs_read_block(mount, last_block, block_buffer, 0);
             if (res < 0) return 0;
             memset(
                 block_buffer + (new_size % GLFS_BLOCK_SIZE), 0,
                 GLFS_BLOCK_SIZE - (new_size % GLFS_BLOCK_SIZE)
             );
-            res = glfs_write_block(mount, last_block, block_buffer);
+            res = glfs_write_block(mount, last_block, block_buffer, 0);
             if (res < 0) return 0;
         }
     }
@@ -508,7 +524,7 @@ int64_t glfs_read(glfs_mount_t* mount, uint64_t inode_number, void* buffer, uint
     if (!buffer) return -EINVAL;
     if (size == 0) return 0;
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     if (inode.type == GLFS_BLK || inode.type == GLFS_CHR) {
         return -ENODEV;
@@ -530,7 +546,7 @@ int64_t glfs_read(glfs_mount_t* mount, uint64_t inode_number, void* buffer, uint
     }
     for (int i = 0; i < block_count; i++) {
         uint8_t block_buffer[GLFS_BLOCK_SIZE];
-        res = glfs_read_block(mount, block_pointers[i], block_buffer);
+        res = glfs_read_block(mount, block_pointers[i], block_buffer, 0);
         if (res < 0) {
             mount->backing.free(block_pointers);
             return res;
@@ -548,7 +564,7 @@ int64_t glfs_read(glfs_mount_t* mount, uint64_t inode_number, void* buffer, uint
     mount->backing.free(block_pointers);
     if (mount->backing.time && !mount->read_only) {
         inode.atime = mount->backing.time();
-        glfs_write_block(mount, inode_number, &inode);
+        glfs_write_block(mount, inode_number, &inode, 1);
     }
     return bytes_read;
 }
@@ -558,14 +574,14 @@ int64_t glfs_write(glfs_mount_t* mount, uint64_t inode_number, const void* buffe
     if (!buffer) return -EINVAL;
     if (size == 0) return 0;
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     if (inode.type == GLFS_BLK || inode.type == GLFS_CHR) {
         return -ENODEV;
     }
     if (mount->backing.time) {
         inode.mtime = mount->backing.time();
-        glfs_write_block(mount, inode_number, &inode);
+        glfs_write_block(mount, inode_number, &inode, 1);
     }
     if (offset + size > inode.size) {
         res = _glfs_truncate(mount, inode_number, offset + size, 1);
@@ -586,7 +602,7 @@ int64_t glfs_write(glfs_mount_t* mount, uint64_t inode_number, const void* buffe
     for (int i = 0; i < block_count; i++) {
         uint8_t block_buffer[GLFS_BLOCK_SIZE];
         if (in_block_offset > 0 || size - bytes_written < GLFS_BLOCK_SIZE) {
-            res = glfs_read_block(mount, block_pointers[i], block_buffer);
+            res = glfs_read_block(mount, block_pointers[i], block_buffer, 0);
             if (res < 0) {
                 mount->backing.free(block_pointers);
                 return res;
@@ -595,7 +611,7 @@ int64_t glfs_write(glfs_mount_t* mount, uint64_t inode_number, const void* buffe
         for (int j = 0; j < GLFS_BLOCK_SIZE - in_block_offset && j < size - bytes_written; j++) {
             block_buffer[in_block_offset + j] = ((uint8_t*)buffer)[bytes_written + j];
         }
-        res = glfs_write_block(mount, block_pointers[i], block_buffer);
+        res = glfs_write_block(mount, block_pointers[i], block_buffer, 0);
         if (res < 0) {
             mount->backing.free(block_pointers);
             return res;
@@ -633,7 +649,7 @@ int glfs_get_dirent(glfs_mount_t* mount, const char* path, glfs_dirent_ref_t* p_
         }
         if (count == GLFS_MAX_FILENAME_LENGTH && *path && *path != '/') return -ENAMETOOLONG;
         inode_block = next_inode_block;
-        res = glfs_read_block(mount, inode_block, &current);
+        res = glfs_read_block(mount, inode_block, &current, 1);
         if (res < 0) return res;
         if (current.type != GLFS_DIR) return -ENOENT;
         if (current.size == 0) return -ENOENT;
@@ -670,7 +686,7 @@ int glfs_lookup(glfs_mount_t *mount, const char* name, uint64_t parent, uint64_t
     if (!parent) return -EINVAL;
 
     glfs_inode_t parent_inode;
-    int res = glfs_read_block(mount, parent, &parent_inode);
+    int res = glfs_read_block(mount, parent, &parent_inode, 1);
     if (res < 0) return res;
 
     if (parent_inode.type != GLFS_DIR) return -EINVAL;
@@ -715,7 +731,7 @@ int glfs_lookup_path(glfs_mount_t *mount, const char *path, uint64_t *inode) {
 
 static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     glfs_block_free(mount, inode_number, 1);
     uint64_t blocks_visited = 0;
@@ -729,7 +745,7 @@ static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
     cont.next_inode_block = inode.next_inode_block;
     while (cont.next_inode_block) {
         uint64_t current = cont.next_inode_block;
-        res = glfs_read_block(mount, current, &cont);
+        res = glfs_read_block(mount, current, &cont, 0);
         if (res < 0) return res;
         for (int i = 0; i < sizeof(cont.blocks) / 8 && blocks_visited < inode.block_count; i++) {
             blocks_visited++;
@@ -740,7 +756,7 @@ static int glfs_rmnod(glfs_mount_t* mount, uint64_t inode_number) {
     }
     glfs_flush_bitmap(mount);
     inode = (glfs_inode_t){0};
-    glfs_write_block(mount, inode_number, &inode);
+    glfs_write_block(mount, inode_number, &inode, 0);
     if (mount->backing.sync) mount->backing.sync(mount->backing.data);
     return 0;
 }
@@ -767,7 +783,7 @@ int glfs_close(glfs_mount_t* mount, uint64_t inode_number) {
         if (mount->open_files[i].inode == inode_number) {
             if (--mount->open_files[i].opencount == 0) {
                 glfs_inode_t inode;
-                int res = glfs_read_block(mount, inode_number, &inode);
+                int res = glfs_read_block(mount, inode_number, &inode, 0);
                 if (res >= 0 && inode.refcount == 0) {
                     glfs_rmnod(mount, inode_number);
                 }
@@ -783,20 +799,20 @@ int glfs_readdir(glfs_mount_t* mount, uint64_t inode_number, int index, glfs_rea
     if (!out) return -EINVAL;
     if (index < 0) return -EINVAL;
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     if (inode.type != GLFS_DIR) return -ENOTDIR;
     if (inode.size % 256 != 0) return -EIO;
     if (mount->backing.time) {
         inode.atime = mount->backing.time();
-        glfs_write_block(mount, inode_number, &inode);
+        glfs_write_block(mount, inode_number, &inode, 1);
     }
     uint64_t dirent_count = inode.size / 256;
     if (index >= dirent_count) return 0;
     glfs_dirent_t dirent;
     res = glfs_read(mount, inode_number, (uint8_t*)&dirent, index * 256, 256);
     if (res < 0) return res;
-    res = glfs_read_block(mount, dirent.inodeptr, &inode);
+    res = glfs_read_block(mount, dirent.inodeptr, &inode, 0);
     if (res < 0) return res;
     memcpy(out->name, dirent.name, GLFS_MAX_FILENAME_LENGTH);
     out->name[GLFS_MAX_FILENAME_LENGTH] = '\0'; // sizeof(dirent_t.name) = 256, GLFS max filename = 248
@@ -807,7 +823,7 @@ int glfs_readdir(glfs_mount_t* mount, uint64_t inode_number, int index, glfs_rea
 int glfs_getattr(glfs_mount_t* mount, uint64_t inode_number, glfs_attr_t *out) {
     if (!out) return -EINVAL;
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     out->inode = inode_number;
     out->type = inode.type;
@@ -862,13 +878,13 @@ static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_numb
         dir.inodeptr = mount->superblock.root_inode;
     }
     glfs_inode_t dir_inode;
-    res = glfs_read_block(mount, dir.inodeptr, &dir_inode);
+    res = glfs_read_block(mount, dir.inodeptr, &dir_inode, 0);
     if (res < 0) return res;
     if (dir_inode.size % 256 != 0) return -EIO;
 
     // Read inode
     glfs_inode_t inode = {0};
-    res = glfs_read_block(mount, inode_number, &inode);
+    res = glfs_read_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
 
     if (inode.type == GLFS_DIR && !allow_dirs) return -EISDIR;
@@ -878,7 +894,7 @@ static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_numb
     if (mount->backing.time) {
         inode.ctime = mount->backing.time();
     }
-    res = glfs_write_block(mount, inode_number, &inode);
+    res = glfs_write_block(mount, inode_number, &inode, 0);
     if (res < 0) return res;
     if (mount->backing.sync) mount->backing.sync(mount->backing.data);
 
@@ -915,7 +931,7 @@ int glfs_mknod(glfs_mount_t* mount, const char *path, uint32_t type, uint64_t de
         inode.mtime = mount->backing.time();
         inode.ctime = mount->backing.time();
     }
-    res = glfs_write_block(mount, inode_number, &inode);
+    res = glfs_write_block(mount, inode_number, &inode, 1);
     if (res < 0) {
         glfs_block_free(mount, inode_number, 1);
         return res;
@@ -957,7 +973,7 @@ int glfs_delete(glfs_mount_t* mount, const char *path) {
         dir.inodeptr = mount->superblock.root_inode;
     }
     glfs_inode_t dir_inode;
-    res = glfs_read_block(mount, dir.inodeptr, &dir_inode);
+    res = glfs_read_block(mount, dir.inodeptr, &dir_inode, 1);
     if (res < 0) return res;
     if (dir_inode.size % 256 != 0) return -EIO;
 
@@ -968,7 +984,7 @@ int glfs_delete(glfs_mount_t* mount, const char *path) {
     res = glfs_read(mount, dirent_ref.inode, (uint8_t*)&dirent, dirent_ref.index * 256, 256);
     if (res < 0) return res;
     glfs_inode_t inode;
-    res = glfs_read_block(mount, dirent.inodeptr, &inode);
+    res = glfs_read_block(mount, dirent.inodeptr, &inode, 1);
     if (res < 0) return res;
 
     // Delete dirent
@@ -988,7 +1004,7 @@ int glfs_delete(glfs_mount_t* mount, const char *path) {
         glfs_rmnod(mount, dirent.inodeptr);
     } else {
         inode.refcount--;
-        glfs_write_block(mount, dirent.inodeptr, &inode);
+        glfs_write_block(mount, dirent.inodeptr, &inode, 0);
     }
     if (mount->backing.sync) mount->backing.sync(mount->backing.data);
 
@@ -1027,27 +1043,27 @@ int glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t new_size)
 
 int glfs_chmod(glfs_mount_t *mount, uint64_t inode_number, uint32_t permissions) {
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     inode.perms = permissions;
     if (mount->backing.time) {
         inode.ctime = mount->backing.time();
     }
-    res = glfs_write_block(mount, inode_number, &inode);
+    res = glfs_write_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     return 0;
 }
 
 int glfs_chown(glfs_mount_t *mount, uint64_t inode_number, uint64_t uid, uint64_t gid) {
     glfs_inode_t inode;
-    int res = glfs_read_block(mount, inode_number, &inode);
+    int res = glfs_read_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     inode.uid = uid;
     inode.gid = gid;
     if (mount->backing.time) {
         inode.ctime = mount->backing.time();
     }
-    res = glfs_write_block(mount, inode_number, &inode);
+    res = glfs_write_block(mount, inode_number, &inode, 1);
     if (res < 0) return res;
     return 0;
 }

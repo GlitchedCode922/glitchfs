@@ -843,11 +843,18 @@ int glfs_getattr(glfs_mount_t* mount, uint64_t inode_number, glfs_attr_t *out) {
     return 0;
 }
 
-static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_number, uint64_t allow_dirs) {
+static int _glfs_link(glfs_mount_t* mount, const char *path, uint64_t inode_number, int allow_dirs, int replace_dest) {
     if (mount->read_only) return -EROFS;
     if (!path) return -EINVAL;
     uint64_t tmp;
-    if (glfs_lookup_path(mount, path, &tmp) >= 0) return -EEXIST;
+    if (glfs_lookup_path(mount, path, &tmp) >= 0) {
+        if (replace_dest) {
+            int res = glfs_delete(mount, path);
+            if (res < 0) return res;
+        } else {
+            return -EEXIST;
+        }
+    }
     size_t len = glfs_strlen(path);
     while (len > 0 && path[len - 1] == '/') {
         len--;
@@ -940,7 +947,7 @@ int glfs_mknod(glfs_mount_t* mount, const char *path, uint32_t type, uint64_t de
         glfs_block_free(mount, inode_number, 1);
         return res;
     }
-    res = _glfs_link(mount, path, inode_number, 1);
+    res = _glfs_link(mount, path, inode_number, 1, 0);
     if (res < 0) glfs_block_free(mount, inode_number, 1);
     return res;
 }
@@ -1029,7 +1036,7 @@ int glfs_rename(glfs_mount_t* mount, const char *old_path, const char *new_path)
     } else {
         old_dirent.inodeptr = mount->superblock.root_inode;
     }
-    res = _glfs_link(mount, new_path, old_dirent.inodeptr, 1);
+    res = _glfs_link(mount, new_path, old_dirent.inodeptr, 1, 1);
     if (res < 0) return res;
     res = glfs_delete(mount, old_path);
     if (res < 0) glfs_delete(mount, new_path);
@@ -1038,7 +1045,7 @@ int glfs_rename(glfs_mount_t* mount, const char *old_path, const char *new_path)
 
 int glfs_link(glfs_mount_t *mount, uint64_t inode_number, const char *link) {
     if (mount->read_only) return -EROFS;
-    return _glfs_link(mount, link, inode_number, 0);
+    return _glfs_link(mount, link, inode_number, 0, 0);
 }
 
 int glfs_truncate(glfs_mount_t *mount, uint64_t inode_number, uint64_t new_size) {
